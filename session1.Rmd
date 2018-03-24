@@ -1,0 +1,241 @@
+---
+title: "Session 1: Dirichlet Process"
+output:
+  html_document:
+    df_print: paged
+    toc: true
+    number_sections: true
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. You can execute a code chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Cmd+Shift+Enter*. 
+
+```{r setup, include=FALSE, echo=FALSE}
+knitr::opts_chunk$set(echo = TRUE, cache = TRUE)
+```
+
+```{r, results='hide', message=FALSE, echo=FALSE}
+source("install_and_load.R")
+```
+
+
+
+#Polya Urn
+
+
+The following lines of code samples observations from a Dirichlet process with a  base measure in argument, which is also interpreted as the color distribution in the Polya urn scheme.
+
+```{r}
+polya_urn_model <- function(base_measure, N_ball, alpha) {
+  balls <- c()
+  for (i in 1:N_ball) {
+    if (runif(1) < alpha / (alpha + length(balls))) {
+      # Add a new ball color.
+      new_color <- base_measure()
+      balls <- c(balls, new_color)
+    } else {
+      # Pick out a ball from the urn, and add back a
+      # ball of the same color.
+      ball <- balls[sample(1:length(balls), 1)]
+      balls <- c(balls, ball)
+    }
+  }
+  balls
+}
+```
+
+
+This is applied to sample 10 observations from a Dirichlet process with a  Gaussian $N(0,1)$ base measure, which is also interpreted as the color distribution in the P\'oly urn scheme, and precision parameter varying from 1, 10 to 100.
+
+```{r}
+N_ball <- 10
+# with alpha = 1
+polya_sample <- polya_urn_model(function() rnorm(1), N_ball, 1)
+rev(sort(table(polya_sample)))
+# with alpha = 10
+polya_sample <- polya_urn_model(function() rnorm(1), N_ball, 10)
+rev(sort(table(polya_sample)))
+# with alpha = 100
+polya_sample <- polya_urn_model(function() rnorm(1), N_ball, 100)
+rev(sort(table(polya_sample)))
+```
+
+
+# Stick-breaking representation
+
+As we know, the Dirichlet process is a discrete random probability measure which can be represented as a convex combination of infinitely many Dirac masses, 
+\begin{equation*}
+		G = \sum_{k=1}^\infty \pi_k\delta_{\phi_k}.
+\end{equation*}
+The stick-breaking representation,  due to \cite{sethuraman1994constructive}, provides a constructive way of building the weights $(\pi_k)_k$ of the Dirichlet process. This is done by sequentially breaking a stick of initial unit length, into pieces whose lengths correspond to the $(\pi_k)_k$. More specifically, we require independent and identically distributed (iid) random variables $V_k\sim Beta(1,\alpha)$. The first weight $\pi_1$ corresponds to $V_1$. This leaves a piece of length $1-V_1$, which is broken at $V_2$ in order to define $\pi_2=V_2(1-V_1)$. And sequentially, the same procedure is applied to the remaining part, which equals $(1-V_1)(1-V_2)$ at this second step. It is easy to see that after $k$ steps, one defines $\pi_k=V_k(1-V_1)\cdots(1-V_{k-1})$, and the remaining piece has length $(1-V_1)\cdots(1-V_{k})$. The representation is completed by assuming iid draws from the base measure $G_0$ for the locations $\phi_k$, independent from the $V_k$.
+
+\begin{theorem}[\citep{sethuraman1994constructive}]
+	Let $V_1,V_2,\ldots\sim iid Beta(1,\alpha)$ and $\phi_1,\phi_2,\ldots\simiid G_0$ be independent random variables. Define
+	\begin{align*}
+		\pi_1 &= V_1,\\
+		\pi_k &= V_k(1-V_1)\cdots(1-V_{k-1}), \text{ for any } k\geq 2.
+	\end{align*}
+	Then $G = \sum_{k=1}^\infty \pi_k\delta_{\phi_k} \sim \DP(\alpha G_0)$.
+\end{theorem}
+
+The proof of this result is in two steps. First, to show that the remaining stick length at step $k$, $(1-V_1)\cdots(1-V_{k})$, converges to zero as $k\to\infty$. This ensures that the weights vector lives in the unit simplex, and in turn that the measure $\sum_{k=1}^\infty \pi_k\delta_{\phi_k}$ is a probability measure. Second, to use the stick-breaking construction to show that the defined $G$ satisfies the distributional equation
+\begin{equation}\label{eq:DP_dist_equation}
+	G = V\delta_\phi + (1-V)G,
+\end{equation}
+where $V\sim Beta(1,\alpha)$ and $\phi\sim G$, independently. Finally, one can show that the Dirichlet process is the only solution to equation~\ref{eq:DP_dist_equation} by properties of the Dirichlet distribution, together with Definition~\ref{def:DP_marginal}.
+
+```{r}
+stick_breaking_process = function(num_weights, alpha) {
+  betas = rbeta(num_weights, 1, alpha)
+  remaining_stick_lengths = c(1, cumprod(1 - betas))[1:num_weights]
+  weights = remaining_stick_lengths * betas
+  weights
+}
+```
+
+
+```{r}
+num_weights <- 50
+draw_stick_breaking <- function(alpha) {
+  labels <- 1:num_weights
+  locations <- rnorm(num_weights)
+  SB_weights <- stick_breaking_process(num_weights, alpha)
+  df <- data.frame(labels, locations, SB_weights)
+  order_plot <- ggplot(df, aes(labels, SB_weights, fill = as.factor(labels))) + 
+    geom_bar(stat = "identity") + 
+    theme(legend.position="none") 
+  location_plot <- ggplot(df, aes(locations, SB_weights, fill = as.factor(labels))) + 
+    geom_bar(stat = "identity", width = .1) + 
+    theme(legend.position="none") 
+  grid.arrange(order_plot, location_plot, ncol = 2)
+}
+```
+
+```{r, warning = FALSE, message=FALSE}
+draw_stick_breaking(1)
+draw_stick_breaking(10)
+draw_stick_breaking(100)
+```
+
+
+
+
+
+#Marginal distribution
+
+##Illustration of Dirichlet marginals in 1D space
+
+
+```{r}
+# Polya Urn draws for varying parameter alpha values
+alpha_vect = c(0.1, 1, 10, 100, 1000)
+N_urns = 1
+N_draws = 100
+# N_xaxis = 200
+# x_axis = seq(-3,3,length = N_xaxis)
+result = NULL
+for(u in 1:N_urns){
+  for(alpha in alpha_vect){
+    PU = polya_urn_model(function() rnorm(1), N_draws, alpha)
+    new_draw = cbind(PU, alpha, u)
+    result = rbind(result, new_draw)
+  }
+}
+result = as.data.frame(result)
+names(result) = c("PU", "alpha", "urn_number")
+plot1 =  qplot(data = result, PU, binwidth = 10) + facet_grid(.~alpha, labeller =  label_bquote(alpha == .(alpha))) + 
+    aes(color = as.factor(alpha))
+plot2 =  qplot(data = result, PU, binwidth = 3) + facet_grid(.~alpha, labeller =  label_bquote(alpha == .(alpha))) + 
+    aes(color = as.factor(alpha))
+plot3 =  qplot(data = result, PU, binwidth = 1) + facet_grid(.~alpha, labeller =  label_bquote(alpha == .(alpha))) + 
+    aes(color = as.factor(alpha))
+plot4 =   qplot(data = result, PU, binwidth = .5) + facet_grid(.~alpha, labeller =  label_bquote(alpha == .(alpha))) + 
+    aes(color = as.factor(alpha))
+```
+
+
+```{r, fig.height=3, fig.width=10, out.width = "150%"}
+plot1
+plot2
+plot3
+plot4
+```
+
+
+
+
+##Illustration of Dirichlet marginals in 2D space
+
+```{r}
+# Return a vector of `N_ball` ball colors from a Polya Urn Model
+# with dispersion `alpha`
+# sampling from a specified base measure (color) distribution.
+  polya_urn_model_2D = function(base_measure, N_ball, alpha) {
+    balls = NULL
+  
+    for (i in 1:N_ball) {
+      if (runif(1) < alpha / (alpha + length(balls))) {
+        # Add a new ball color.
+        new_color = base_measure()
+        balls = cbind(balls, new_color)
+      } else {
+        # Pick out a ball from the urn, and add back a
+        # ball of the same color.
+        ball = balls[, sample(1:(dim(balls)[2]), 1)]
+        balls = cbind(balls, ball)
+      }
+    }
+    balls
+  }
+```
+
+
+```{r, fig.height=3, fig.width=10, out.width = "150%"}
+for(i in 1:3){
+res = polya_urn_model_2D(function() rnorm(2), 10000, 1000)
+result = as.data.frame(t(res))
+names(result) = c("x","y")
+g = ggplot(result, aes(x,y))  + coord_fixed(xlim = c(-3,3), ylim = c(-3,3)) + scale_fill_viridis(option = "magma")
+plot1 = g + geom_bin2d(binwidth = c(1,1))
+plot2 = g + geom_hex(binwidth = c(.75,.75)) 
+plot3 = g + stat_density2d(aes(fill = ..level..), geom = "polygon", n = 100)
+grid.arrange(plot1, plot2, plot3, ncol=3)
+}
+```
+
+
+
+
+#Dirichlet process mixture models
+
+In nonparametric mixture models, the Dirichlet process is used as a prior distribution on the mixing probability measure.
+
+```{r}
+alpha_vect <- c(0.1, 1, 10, 100, 1000)
+N_urns <- 5
+N_draws <- 100
+N_xaxis <- 200
+x_axis <- seq(-3, 3, length = N_xaxis)
+result <- NULL
+for (u in 1:N_urns) {
+  for (alpha in alpha_vect) {
+    PU <- polya_urn_model(function() rnorm(1), N_draws, alpha)
+    res <- mapply(function(mean) dnorm(x_axis, rep(mean, N_xaxis), 
+                                       rep(0.5, N_xaxis)), PU)
+    res <- apply(res, 1, mean)
+    new_draw <- cbind(res, x_axis, alpha, u)
+    result <- rbind(result, new_draw)
+  }
+}
+result <- as.data.frame(result)
+names(result) <- c("density", "x", "alpha", "urn_number")
+DP_mixt <- qplot(data = result, y = density, x = x, geom = c("line", "area")) + 
+  facet_grid(alpha ~ urn_number, labeller = label_bquote(alpha == .(alpha))) + 
+  aes(color = as.factor(alpha)) + 
+  theme(legend.position = "none")
+DP_mixt
+```
+
+
+
+
+
